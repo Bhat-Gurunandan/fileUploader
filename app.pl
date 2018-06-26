@@ -87,31 +87,38 @@ post '/upload' => sub {
     my $uploads = request->uploads('files[]');
     my @array;
     my $json;
-
+    my @uploads;
+    
     mkdir path( $root,$image_path) if not -e path( $root,$image_path);
     mkdir path( $root,$thumb_path) if not -e path( $root,$thumb_path);
 
-#use Data::Dumper;
-#Route exception: Not an ARRAY reference at /home/alfred/webapps/fileUploader/app.pl line 97.
-# $uploads = [ $uploads ] if ref(@{ $uploads->{'files[]'} }) ne 'ARRAY';
+    # use Data::Dumper;
+
+    unless (ref $uploads->{'files[]'} eq 'ARRAY'){
+        push(@uploads,$uploads->{'files[]'});
+        $uploads->{'files[]'} = \@uploads;
+    } 
+
     for my $file ( @{ $uploads->{'files[]'} } ) {
 
-        my $path = path($root.$image_path, $file->basename);
-      
+        my $path = path($root.$image_path, $file->{filename});
+
+
+
         if (-e $path) {
             $json = {
-                name  => $file->basename,
-                size  => $file->size,
+                name  => $file->{filename},
+                size  => $file->{size},
                 error => " File already exists in $image_path"
             };
         } 
         else {
             $json = {
-                name            => $file->basename,
-                size            => $file->size,
-                url             => $file->filename,
-                thumbnailUrl    => path($thumb_path, $file->basename),
-                deleteUrl       => $file->filename,
+                name            => $file->{filename},
+                size            => $file->{size},
+                url             => $file->{filename},
+                thumbnailUrl    => path($thumb_path, $file->{filename}),
+                deleteUrl       => $file->{filename},
                 deleteType      => "DELETE"
             };
 
@@ -119,11 +126,11 @@ post '/upload' => sub {
 
             # generate the thumbbnail
             my $img = Imager->new;
-            $img->read(file=> $root.$image_path.'/'.$file->basename) 
-                or die 'Cannot load '.$image_path.'/'.$file->basename.': ', $img->errstr;
+            $img->read(file=> $root.$image_path.'/'.$file->{filename}) 
+                or die 'Cannot load '.$image_path.'/'.$file->{filename}.': ', $img->{errstr};
             my $thumbnail = $img->scale(xpixels=>80,ypixels=>80);
-            $thumbnail->write(file=>$root.$thumb_path.'/'.$file->basename) 
-                or die 'Cannot save thumbnail file '.$file->basename,$img->errstr;
+            $thumbnail->write(file=>$root.$thumb_path.'/'.$file->{filename}) 
+                or die 'Cannot save thumbnail file '.$file->{filename},$img->{errstr};
         };
         push( @array, $json );
     }
