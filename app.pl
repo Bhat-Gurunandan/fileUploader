@@ -4,9 +4,12 @@ use strict;
 use warnings;
 
 use Dancer2;
-use DBI;
-use Template;
+#use DBI;
+#use Template;
+use Data::Dumper;
 use Imager;
+use Util::Underscore;
+
 # installation instructions:
 # cpanm Imager Imager::File::JPEG
 # sudo yum install libjpeg-devel (libjpeg-dev on Ubuntu)
@@ -20,12 +23,14 @@ set 'startup_info' => 1;
 set 'warnings'     => 1;
 set 'layout'       => 'main';
 
-our $image_path = 'uploads';
-our $thumb_path = 'uploads/thumb';
-our $root       =  config->{appdir}.'/public/';
+our $api_key        = 'uKgMjIpeqXWPbVqdJXPFVdro4LUeXEvk';
+our $root           = config->{appdir}.'/public';
+our $image_dir      = 'uploads';
+our $thumb_dir      = 'thumb';
+our $website        = 'http://www.travellers-palm.com';
 
-hook before_template_render => sub {
-
+hook before_template_render => sub 
+{
     my $tokens = shift;
 
     $tokens->{css_url} = request->base . 'css/';
@@ -38,12 +43,12 @@ get '/' => sub {
     template 'index.tt';
 };
 
-del '/:deletes' => sub {
-   
+del '/:deletes' => sub 
+{   
     my $deletes = param('deletes');
 
-    unlink path($root.$image_path, $deletes);
-    unlink path($root.$thumb_path, $deletes);
+    unlink path("root/$image_dir", $deletes);
+    unlink path("$root/$image_dir/$thumb_dir", $deletes);
 
     my %response;
     $response{'files'} = { $deletes => 1 };
@@ -51,21 +56,24 @@ del '/:deletes' => sub {
     return encode_json(\%response);
 };
 
-get '/upload' => sub {
+get '/upload' => sub 
+{
     my ($json, @array, $error);
 
-    if ( opendir( DIR, $root.$image_path ) ) {
-    
-        while ( my $file = readdir(DIR) ) {
-            next if ( $file =~ m/^\./ );
-            next if ( $file =~ m/thumb/); 
+    if ( opendir( DIR, "$root/$image_dir" ) ) 
+    {
+        while ( my $filename = readdir(DIR) ) 
+        {
+            next if ( $filename =~ m/^\./ );
+            next if ( $filename =~ m/thumb/); 
 
-            $json = {
-                name            => $file,
-                size            => (-s $file),
-                url             => $image_path.$file,
-                thumbnailUrl    => path($thumb_path, $file),
-                deleteUrl       => $file,
+            $json = 
+            {
+                name            => $filename,
+                size            => (-s $filename),
+                url             => path("$image_dir", $filename),
+                thumbnailUrl    => path("image_dir/$thumb_dir", $filename),
+                deleteUrl       => $filename,
                 deleteType      => "DELETE"
             };
             
@@ -73,8 +81,9 @@ get '/upload' => sub {
         };
         closedir(DIR);
     }
-    else {
-        return template 'index.tt' => { $error => "The directory $image_path is not on file" };
+    else 
+    {
+        return template 'index.tt' => { $error => "The directory $image_dir is not on file" };
     };
 
     my %response;
@@ -82,55 +91,77 @@ get '/upload' => sub {
     return encode_json(\%response);
 };
 
-post '/upload' => sub {
-
+post '/upload' => sub 
+{
     my $uploads = request->uploads('files[]');
     my @array;
     my $json;
     my @uploads;
     
-    mkdir path( $root,$image_path) if not -e path( $root,$image_path);
-    mkdir path( $root,$thumb_path) if not -e path( $root,$thumb_path);
+    mkdir path( $image_dir) if not -e path(  $image_dir );
+    mkdir path("$image_dir/$thumb_dir") if not -e path( "$image_dir/$thumb_dir");
 
-    # use Data::Dumper;
-
-    unless (ref $uploads->{'files[]'} eq 'ARRAY'){
+    unless (_::is_array_ref $uploads->{'files[]'})
+    {
         push(@uploads,$uploads->{'files[]'});
         $uploads->{'files[]'} = \@uploads;
     } 
 
-    for my $file ( @{ $uploads->{'files[]'} } ) {
+    for my $data ( @{ $uploads->{'files[]'} } ) {
 
-        my $path = path($root.$image_path, $file->{filename});
-
-
-
-        if (-e $path) {
-            $json = {
-                name  => $file->{filename},
-                size  => $file->{size},
-                error => " File already exists in $image_path"
+        my $filename = $data->{filename};
+       
+        if (-e "$image_dir/$filename") 
+        {
+            $json = 
+            {
+                name  => $filename,
+                size  => $data->{size},
+                error => "$filename already exists in $image_dir"
             };
         } 
-        else {
-            $json = {
-                name            => $file->{filename},
-                size            => $file->{size},
-                url             => $file->{filename},
-                thumbnailUrl    => path($thumb_path, $file->{filename}),
-                deleteUrl       => $file->{filename},
+        else 
+        {
+            $json = 
+            {
+                name            => $filename,
+                size            => $data->{size},
+                url             => "$image_dir/$filename",
+                thumbnailUrl    => path("$image_dir/$thumb_dir", $data->{filename}),
+                deleteUrl       => $data->{filename},
                 deleteType      => "DELETE"
             };
 
-            $file->copy_to($path);
+            $data->copy_to("$root/$image_dir/$filename");
+
+            # compress the image by TinyPNG
+            my $compressed = `curl https://api.tinify.com/shrink --user api:$api_key 
+                            --data-binary "$website/$image_dir/$filename" --dump-header /dev/stdout`;
+
+
+debug to_dumper($compressed);
+
+#debug to_dumper( $compressed->{error});
+    
+            if ( $compressed =~ m/error/ )
+            {
+                $json = 
+                {
+                    name  => $filename,
+                    size  => $data->{size},
+                    error => "Issue compressing $website/$image_dir/$filename: $compressed"
+                };
+            }
+
 
             # generate the thumbbnail
             my $img = Imager->new;
-            $img->read(file=> $root.$image_path.'/'.$file->{filename}) 
-                or die 'Cannot load '.$image_path.'/'.$file->{filename}.': ', $img->{errstr};
+               $img->read(file => "$root/$image_dir/$filename") 
+                        or die "Cannot read $filename from file: ", $img->{errstr};
             my $thumbnail = $img->scale(xpixels=>80,ypixels=>80);
-            $thumbnail->write(file=>$root.$thumb_path.'/'.$file->{filename}) 
-                or die 'Cannot save thumbnail file '.$file->{filename},$img->{errstr};
+               $thumbnail->write(file => "$root/$image_dir/$thumb_dir/$filename") 
+                        or die "Cannot save thumbnail $filename: ",$img->{errstr};
+            
         };
         push( @array, $json );
     }
